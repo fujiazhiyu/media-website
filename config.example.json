@@ -1,0 +1,16 @@
+{
+  "host": "127.0.0.1",
+  "port": 8090,
+  "lan": { "enabled": false, "passwordHash": "", "sessionHours": 12 },
+  "roots": [
+    { "id": "videos", "name": "视频库", "path": "D:\\Videos" },
+    { "id": "photos", "name": "照片库", "path": "E:\\Photos" }
+  ],
+  "cacheDir": ".cache",
+  "thumbnail": { "width": 320, "concurrency": 2, "maxQueue": 128, "timeoutMs": 20000, "maxCacheMB": 1024 },
+  "ffmpegPath": "ffmpeg",
+  "ffprobePath": "ffprobe",
+  "textPreviewBytes": 1048576,
+  "directoryCacheMs": 2000,
+  "maxStreams": 32
+}

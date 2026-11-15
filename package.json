@@ -1,0 +1,19 @@
+{
+  "name": "local-frame-media-browser",
+  "version": "1.0.0",
+  "private": true,
+  "description": "只读、离线的 Windows 本地媒体浏览器",
+  "type": "module",
+  "engines": { "node": ">=24 <27" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "test:browser": "node --test tests/browser.e2e.js",
+    "check": "node scripts/check.js",
+    "password": "node scripts/password.js",
+    "demo": "node scripts/create-demo.js",
+    "start:demo": "node server.js --config config.demo.json"
+  },
+  "dependencies": { "express": "5.3.0", "iconv-lite": "0.7.3", "sharp": "0.35.5" },
+  "devDependencies": { "playwright": "1.65.1" }
+}
