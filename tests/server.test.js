@@ -9,6 +9,12 @@ import { normalizeConfig, inside } from '../server/config.js';
 import { parseRange } from '../server/range.js';
 import { hashPassword } from '../server/auth.js';
 import { Thumbnails } from '../server/thumbnails.js';
+import { thumbnailTime } from '../server/thumbnails.js';
+test('视频封面选取三分钟之后；短视频首帧', () => {
+  assert.equal(thumbnailTime(90), 0); assert.equal(thumbnailTime(179.9), 0);
+  assert.equal(thumbnailTime(600), 181); assert.ok(thumbnailTime(180.2) > 180 && thumbnailTime(180.2) < 180.2);
+  assert.throws(() => thumbnailTime(null));
+});
 
 test('配置默认仅监听本机，局域网必须显式开启且配置哈希', () => {
   const c = normalizeConfig(); assert.equal(c.host, '127.0.0.1'); assert.equal(c.port, 8090); assert.equal(c.lan.enabled, false);
@@ -149,10 +155,14 @@ test('FFmpeg / ffprobe 真实视频缩略图、元数据、磁盘缓存', async 
   const thumb = await f.request('thumbnail', 'media', 'valid.mp4'); assert.equal(thumb.status, 200); const meta = await sharp(Buffer.from(await thumb.arrayBuffer())).metadata(); assert.equal(meta.width, 320);
   const second = await f.request('thumbnail', 'media', 'valid.mp4'); assert.equal(second.headers.get('x-thumbnail-cache'), 'HIT'); await second.arrayBuffer();
   const info = await (await f.request('metadata', 'media', 'valid.mp4')).json(); assert.equal(info.videoCodec, 'h264'); assert.equal(info.audioCodec, 'aac'); assert.ok(info.duration >= 89);
+  // Red for 180 seconds then blue: assert the generated cover actually comes from after 3:00.
+  await f.service.thumbs.runner.run(f.config.ffmpegPath, ['-nostdin', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=320x180:r=1:d=180', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:r=1:d=4', '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0[out]', '-map', '[out]', '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '1', '-y', path.join(f.media, 'long.mp4')], 20000);
+  const long = await f.request('thumbnail', 'media', 'long.mp4'); assert.equal(long.status, 200);
+  const colors = await sharp(Buffer.from(await long.arrayBuffer())).stats(); assert.ok(colors.channels[2].mean > 200); assert.ok(colors.channels[0].mean < 20);
   let active = 0, peak = 0, started = 0;
   const original = f.service.thumbs.runner.run.bind(f.service.thumbs.runner);
   f.service.thumbs.runner.run = async (...args) => { active++; started++; peak = Math.max(peak, active); try { return await original(...args); } finally { active--; } };
   for (let i = 0; i < 8; i++) await fs.copyFile(path.join(f.media, 'valid.mp4'), path.join(f.media, `queue${i}.mp4`));
   await Promise.all(Array.from({ length: 8 }, async (_, i) => { const r = await f.request('thumbnail', 'media', `queue${i}.mp4`); assert.equal(r.status, 200); await r.arrayBuffer(); }));
-  assert.equal(started, 8); assert.equal(peak, 2); assert.equal(active, 0);
+  assert.equal(started, 16); assert.equal(peak, 2); assert.equal(active, 0);
 });

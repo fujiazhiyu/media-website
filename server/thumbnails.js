@@ -10,6 +10,11 @@ import { inside } from './config.js';
 
 sharp.cache({ memory: 32, files: 0, items: 32 });
 sharp.concurrency(1);
+export function thumbnailTime(duration) {
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error('无法确定视频时长');
+  // Avoid seeking exactly to EOF for videos only slightly longer than 3 minutes.
+  return duration > 180 ? Math.min(181, 180 + (duration - 180) / 2) : 0;
+}
 export class Thumbnails {
   constructor(config, library, logger = console) {
     this.config = config; this.library = library; this.logger = logger;
@@ -28,7 +33,7 @@ export class Thumbnails {
     await this.prune();
   }
   key(item) {
-    return crypto.createHash('sha256').update(JSON.stringify([3, item.real, item.stat.size, item.stat.mtimeMs, item.stat.ctimeMs, this.config.thumbnail.width])).digest('hex');
+    return crypto.createHash('sha256').update(JSON.stringify([4, item.real, item.stat.size, item.stat.mtimeMs, item.stat.ctimeMs, this.config.thumbnail.width])).digest('hex');
   }
   async exists(file) { try { return (await fs.stat(file)).size > 0; } catch { return false; } }
   async cached(item, suffix, produce) {
@@ -84,10 +89,10 @@ export class Thumbnails {
       if (type === 'image') {
         await sharp(source.real, { animated: false, limitInputPixels: 100000000, failOn: 'error' }).rotate().resize({ width: this.config.thumbnail.width, withoutEnlargement: true }).webp({ quality: 76 }).timeout({ seconds: Math.ceil(this.config.thumbnail.timeoutMs / 1000) }).toFile(temp);
       } else {
+        const timestamp = thumbnailTime((await this.probe(source)).duration);
         const args = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1', '-protocol_whitelist', 'file'];
         const tail = ['-i', source.real, '-frames:v', '1', '-vf', `scale=${this.config.thumbnail.width}:-2`, '-an', '-threads', '1', '-y', temp];
-        await this.runner.run(this.config.ffmpegPath, [...args, '-ss', '1', ...tail], this.config.thumbnail.timeoutMs);
-        if (!(await this.exists(temp))) await this.runner.run(this.config.ffmpegPath, [...args, '-ss', '0', ...tail], this.config.thumbnail.timeoutMs);
+        await this.runner.run(this.config.ffmpegPath, [...args, '-ss', String(timestamp), ...tail], this.config.thumbnail.timeoutMs);
         if (!(await this.exists(temp))) throw new Error('没有可用的视频帧');
       }
     });

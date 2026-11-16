@@ -7,6 +7,7 @@ export class Player {
     this.key = `${root}:${item.path}`; this.lastSaved = 0; this.draggingProgress = false; this.closed = false;
     this.shell = el('section', 'player'); this.shell.setAttribute('aria-label', '视频播放器');
     this.surface = el('div', 'video-surface');
+    this.surface.tabIndex = 0;
     this.video = el('video'); this.video.playsInline = true; this.video.preload = 'metadata'; this.video.controls = false; this.video.setAttribute('aria-label', item.name);
     this.video.src = url('stream', root, item.path);
     this.feedback = el('div', 'video-feedback'); this.feedback.hidden = true; this.feedback.setAttribute('aria-live', 'polite');
@@ -38,13 +39,22 @@ export class Player {
     const download = el('a', 'primary', '下载原文件'); download.href = url('download', root, item.path); download.download = '';
     this.error.append(errorText, errorHelp, download);
     this.details = el('div', 'player-details');
-    this.details.append(el('p', 'muted small', '空格 播放 / 暂停　 ·　 双击两侧 ±10s　 ·　 左右滑动预览后跳转'));
+    this.details.append(el('p', 'muted small', '空格 播放 / 暂停 · 双击两侧 ±10s · 全屏：单击控制条，双击播放 / 暂停'));
     this.metadata = el('p', 'muted small', '正在读取视频信息…'); this.details.append(this.metadata);
     container.append(this.shell, this.error, this.details);
     this.bind(); this.loadMetadata();
   }
   on(node, event, fn, options = {}) { node.addEventListener(event, fn, { ...options, signal: this.abort.signal }); }
   bind() {
+    this.on(document, 'fullscreenchange', () => {
+      clearTimeout(this.tapTimer); clearTimeout(this.controlsTimer); this.lastTap = null; this.pointer = null;
+      this.controls.hidden = this.isFullscreen();
+      if (this.isFullscreen()) this.surface.focus({ preventScroll: true });
+    });
+    this.on(this.controls, 'pointerdown', () => clearTimeout(this.controlsTimer));
+    this.on(this.controls, 'pointerup', () => this.scheduleControlsHide());
+    this.on(this.controls, 'focusin', () => clearTimeout(this.controlsTimer));
+    this.on(this.controls, 'focusout', () => this.scheduleControlsHide());
     this.on(this.video, 'loadedmetadata', () => {
       this.seek.disabled = !Number.isFinite(this.video.duration); this.seek.max = this.video.duration || 100;
       const positions = storage.get('lf-positions', {}), saved = resumePosition(positions?.[this.key]?.time, this.video.duration);
@@ -63,6 +73,7 @@ export class Player {
     this.on(this.seek, 'change', () => { this.video.currentTime = Number(this.seek.value); this.draggingProgress = false; this.update(); });
     this.on(this.seek, 'pointercancel', () => { this.draggingProgress = false; this.update(); });
     this.on(document, 'keydown', e => {
+      if (this.isFullscreen() && e.key === 'Tab') this.setControlsVisible(true);
       if (e.target.closest('input,textarea,select,[contenteditable="true"]') || (e.code === 'Space' && e.target.closest('button,a'))) return;
       if (e.code === 'Space') { e.preventDefault(); this.toggle(); }
       else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); this.jump((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 30 : 10)); }
@@ -98,12 +109,37 @@ export class Player {
       }
       if (p.vertical || Math.hypot(e.clientX - p.x, e.clientY - p.y) > GESTURE.tapSlop) return;
       const box = this.surface.getBoundingClientRect(), zone = tapZone(e.clientX - box.left, box.width), now = performance.now();
+      if (this.isFullscreen()) {
+        if (this.lastTap && now - this.lastTap.time <= GESTURE.doubleTapMs && Math.hypot(e.clientX - this.lastTap.x, e.clientY - this.lastTap.y) < 40) {
+          clearTimeout(this.tapTimer); this.lastTap = null; this.toggle();
+        } else {
+          clearTimeout(this.tapTimer);
+          this.tapTimer = setTimeout(() => { this.lastTap = null; this.setControlsVisible(this.controls.hidden); }, GESTURE.doubleTapMs);
+          this.lastTap = { time: now, x: e.clientX, y: e.clientY };
+        }
+        return;
+      }
       if (zone === 'center') { clearTimeout(this.tapTimer); this.lastTap = null; this.toggle(); return; }
       if (this.lastTap?.zone === zone && now - this.lastTap.time <= GESTURE.doubleTapMs) { clearTimeout(this.tapTimer); this.jump(zone === 'left' ? -10 : 10); }
       else { clearTimeout(this.tapTimer); this.tapTimer = setTimeout(() => this.toggle(), GESTURE.doubleTapMs); }
       this.lastTap = { zone, time: now };
     });
     this.on(this.surface, 'pointercancel', () => { this.pointer = null; this.feedback.hidden = true; clearTimeout(this.tapTimer); this.lastTap = null; });
+  }
+  isFullscreen() { return document.fullscreenElement === this.shell; }
+  setControlsVisible(visible) {
+    clearTimeout(this.controlsTimer);
+    this.controls.hidden = this.isFullscreen() ? !visible : false;
+    if (this.controls.hidden && this.controls.contains(document.activeElement)) this.surface.focus({ preventScroll: true });
+    if (visible) this.scheduleControlsHide();
+  }
+  scheduleControlsHide() {
+    clearTimeout(this.controlsTimer);
+    if (!this.isFullscreen() || this.controls.hidden) return;
+    this.controlsTimer = setTimeout(() => {
+      if (this.draggingProgress || (this.controls.contains(document.activeElement) && document.activeElement.matches(':focus-visible'))) return;
+      this.setControlsVisible(false);
+    }, 3000);
   }
   async loadMetadata() {
     try {
@@ -129,5 +165,5 @@ export class Player {
       else this.notify('此浏览器不支持网页全屏。');
     } catch { this.notify('无法进入全屏，请使用浏览器的全屏功能。'); }
   }
-  destroy() { this.save(); this.closed = true; this.abort.abort(); clearTimeout(this.tapTimer); clearTimeout(this.feedbackTimer); this.video.pause(); this.video.removeAttribute('src'); this.video.load(); }
+  destroy() { this.save(); this.closed = true; this.abort.abort(); clearTimeout(this.tapTimer); clearTimeout(this.feedbackTimer); clearTimeout(this.controlsTimer); this.video.pause(); this.video.removeAttribute('src'); this.video.load(); }
 }

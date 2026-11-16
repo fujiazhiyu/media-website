@@ -73,7 +73,22 @@ test('真实浏览器画廊与播放器端到端验收', { timeout: 180000 }, as
       await page.getByRole('combobox', { name: '播放速度' }).selectOption('1.5'); assert.equal(await page.locator('video').evaluate(v => v.playbackRate), 1.5);
       await page.getByRole('button', { name: '静音', exact: true }).click(); assert.equal(await page.locator('video').evaluate(v => v.muted), true);
       await page.getByRole('button', { name: '全屏', exact: true }).click(); await page.waitForFunction(() => !!document.fullscreenElement);
+      assert.equal(await page.locator('.player-controls').isVisible(), false);
+      const fullscreenSurface = await page.locator('.video-surface').boundingBox();
+      near(fullscreenSurface.height, await page.evaluate(() => innerHeight)); near(fullscreenSurface.y, 0);
+      const fullX = fullscreenSurface.width / 2, fullY = fullscreenSurface.height / 2;
+      await page.mouse.click(fullX, fullY); await page.locator('.player-controls').waitFor({ state: 'visible' });
+      assert.equal(await page.locator('video').evaluate(v => v.paused), true);
+      assert.deepEqual(await page.locator('.video-surface').boundingBox(), fullscreenSurface);
+      assert.equal(await page.locator('.player-controls').evaluate(e => getComputedStyle(e).position), 'absolute');
+      assert.ok((await page.locator('.player-controls').boundingBox()).height < 110);
+      await page.screenshot({ path: path.join(output, `${channel}-fullscreen-overlay.png`) });
+      await page.locator('.player-controls').waitFor({ state: 'hidden', timeout: 5000 });
+      await page.mouse.dblclick(fullX, fullY, { delay: 60 }); await page.waitForFunction(() => !document.querySelector('video').paused);
+      await page.mouse.dblclick(fullX, fullY, { delay: 60 }); await page.waitForFunction(() => document.querySelector('video').paused);
+      assert.equal(await page.locator('.player-controls').isVisible(), false);
       await page.evaluate(() => document.exitFullscreen());
+      await page.locator('.player-controls').waitFor({ state: 'visible' });
       await setTime(page, 30); await page.screenshot({ path: path.join(output, `${channel}-player.png`) }); await closeViewer(page);
       await page.getByRole('button', { name: '视频：valid.mp4', exact: true }).click(); await page.waitForFunction(() => document.querySelector('video')?.currentTime >= 29); near(await currentTime(page), 30);
       await page.getByRole('button', { name: '下一条视频' }).click(); assert.equal(await page.locator('#viewer-title').textContent(), 'valid2.mp4');
@@ -114,6 +129,16 @@ test('真实浏览器画廊与播放器端到端验收', { timeout: 180000 }, as
       assert.equal(await phone.locator('video').evaluate(v => v.paused), true);
       await phone.screenshot({ path: path.join(output, `${channel}-mobile-player.png`) });
       await session.detach();
+      await phone.getByRole('button', { name: '全屏', exact: true }).click(); await phone.waitForFunction(() => !!document.fullscreenElement);
+      assert.equal(await phone.locator('.player-controls').isVisible(), false);
+      const full = await phone.locator('.video-surface').boundingBox(), tx = full.width / 2, ty = full.height / 2;
+      await phone.touchscreen.tap(tx, ty); await phone.locator('.player-controls').waitFor({ state: 'visible' });
+      assert.equal(await phone.locator('video').evaluate(v => v.paused), true);
+      assert.deepEqual(await phone.locator('.video-surface').boundingBox(), full);
+      await phone.touchscreen.tap(tx, ty); await phone.locator('.player-controls').waitFor({ state: 'hidden' });
+      await phone.touchscreen.tap(tx, ty); await phone.touchscreen.tap(tx, ty); await phone.waitForFunction(() => !document.querySelector('video').paused);
+      await phone.touchscreen.tap(tx, ty); await phone.touchscreen.tap(tx, ty); await phone.waitForFunction(() => document.querySelector('video').paused);
+      await phone.evaluate(() => document.exitFullscreen());
     }
     await closeViewer(phone);
     for (const viewport of [{ width: 375, height: 812 }, { width: 768, height: 1024 }, { width: 1024, height: 768 }, { width: 844, height: 390 }]) {
